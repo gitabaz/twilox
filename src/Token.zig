@@ -19,7 +19,7 @@ pub const Token = struct {
     }
 };
 
-pub const Literal = union {
+pub const Literal = union(enum) {
     str: []const u8,
     float: f64,
 };
