@@ -25,7 +25,7 @@ const ParserError = error{
     ExpectExpression,
 };
 
-const Parser = struct {
+pub const Parser = struct {
     tokens: std.ArrayList(Token),
     current: usize = 0,
     expr_ptrs: std.ArrayList(*Expr) = undefined,
@@ -92,6 +92,28 @@ const Parser = struct {
     }
 
     fn term(self: *Self, allocator: std.mem.Allocator) !*Expr {
+        var expr = try self.factor(allocator);
+
+        while (self.match(&[_]TokenType{ .MINUS, .PLUS })) {
+            const operator = self.previous();
+            const right = try self.factor(allocator);
+
+            const new_expr = try allocator.create(Expr);
+            try self.expr_ptrs.append(new_expr);
+            new_expr.* = Expr{
+                .binary = .{
+                    .left = expr,
+                    .operator = operator,
+                    .right = right,
+                },
+            };
+            expr = new_expr;
+        }
+
+        return expr;
+    }
+
+    fn factor(self: *Self, allocator: std.mem.Allocator) !*Expr {
         var expr = try self.unary(allocator);
 
         while (self.match(&[_]TokenType{ .SLASH, .STAR })) {
@@ -234,7 +256,7 @@ const Parser = struct {
     }
 };
 
-test "parser" {
+test "parser bool" {
     const allocator = std.testing.allocator;
     // const source = "var num = 1.23;";
     // const source = "-1.24 * (23);";
@@ -254,7 +276,27 @@ test "parser" {
     defer str.deinit();
 
     expr.print(&str);
-    std.debug.print("{s}\n", .{str.items});
+    try std.testing.expectEqualStrings("(!= 3 3)", str.items);
+}
 
-    // try std.testing.expectEqualStrings("(* (- 123) (group 45.67))", str.items);
+test "parser number" {
+    const allocator = std.testing.allocator;
+    // const source = "var num = 1.23;";
+    const source = "-1.24 * (23);";
+    var scanner: Scanner = .{ .source = source };
+
+    scanner.init(allocator);
+    defer scanner.deinit();
+
+    try scanner.scanTokens();
+
+    var parser: Parser = .{ .tokens = scanner.tokens };
+    defer parser.deinit(allocator);
+    var expr = try parser.parse(allocator);
+
+    var str = std.ArrayList(u8).init(allocator);
+    defer str.deinit();
+
+    expr.print(&str);
+    try std.testing.expectEqualStrings("(* (- 1.24) (group 23))", str.items);
 }

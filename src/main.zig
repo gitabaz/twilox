@@ -1,5 +1,9 @@
 const std = @import("std");
 
+const Scanner = @import("Scanner.zig").Scanner;
+const Parser = @import("Parser.zig").Parser;
+const Interpreter = @import("Interpreter.zig").Interpreter;
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.testing.expect(gpa.deinit() == .ok) catch @panic("leak");
@@ -31,15 +35,34 @@ pub const Lox = struct {
         const contents = try file.readToEndAlloc(allocator, 4096);
         defer allocator.free(contents);
 
-        run(contents);
+        run(allocator, contents);
 
         if (self.has_error) {
             return error.FileError;
         }
     }
 
-    fn run(contents: []const u8) void {
-        std.debug.print("{s}\n", .{contents});
+    fn run(allocator: std.mem.Allocator, contents: []const u8) void {
+        var scanner = Scanner{ .source = contents };
+        scanner.init(allocator);
+        defer scanner.deinit();
+
+        scanner.scanTokens() catch return;
+
+        var parser = Parser{ .tokens = scanner.tokens };
+        defer parser.deinit(allocator);
+        const expr = parser.parse(allocator) catch return;
+
+        var i = Interpreter{};
+        i.init(allocator);
+        defer i.deinit(allocator);
+
+        const res = i.interpret(allocator, expr) catch return;
+        const str = i.stringify(allocator, res) catch return;
+        defer allocator.free(str);
+
+        const stdout = std.io.getStdOut().writer();
+        stdout.print("{s}\n", .{str}) catch return;
     }
 
     fn runPrompt(self: *Self, allocator: std.mem.Allocator) !void {
@@ -51,7 +74,7 @@ pub const Lox = struct {
             const line = try stdin.readUntilDelimiterOrEofAlloc(allocator, '\n', 4096);
             if (line) |contents| {
                 defer allocator.free(contents);
-                run(contents);
+                run(allocator, contents);
                 self.has_error = false;
             } else {
                 break;
